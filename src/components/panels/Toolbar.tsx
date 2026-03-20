@@ -1,5 +1,5 @@
 'use client'
-import React, { useCallback } from 'react'
+import React, { useCallback, useState, useRef, useEffect } from 'react'
 import { useStore } from '@/store/useStore'
 import { ActiveTool, ViewMode } from '@/lib/types'
 import { parseSVGPaths } from '@/lib/svg/parser'
@@ -19,11 +19,146 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
   { id: 'combined', label: 'All' },
 ]
 
+const PX_PER_MM = 96 / 25.4  // 3.7795...
+
+function pxToMm(px: number) { return +(px / PX_PER_MM).toFixed(1) }
+function mmToPx(mm: number) { return Math.round(mm * PX_PER_MM) }
+
+// ─── Canvas size popover ───────────────────────────────────────────────────────
+
+function CanvasSizeMenu({ canvasSize, setCanvasSize }: {
+  canvasSize: { width: number; height: number }
+  setCanvasSize: (w: number, h: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [unit, setUnit] = useState<'px' | 'mm'>('px')
+  const [w, setW] = useState(canvasSize.width)
+  const [h, setH] = useState(canvasSize.height)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Sync local state when canvas changes externally
+  useEffect(() => {
+    setW(canvasSize.width)
+    setH(canvasSize.height)
+  }, [canvasSize.width, canvasSize.height])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', handler)
+    return () => window.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const displayW = unit === 'mm' ? pxToMm(w) : w
+  const displayH = unit === 'mm' ? pxToMm(h) : h
+
+  const applyW = (val: number) => {
+    const px = unit === 'mm' ? mmToPx(val) : Math.round(val)
+    if (px > 0) setW(px)
+  }
+  const applyH = (val: number) => {
+    const px = unit === 'mm' ? mmToPx(val) : Math.round(val)
+    if (px > 0) setH(px)
+  }
+
+  const apply = () => {
+    setCanvasSize(w, h)
+    setOpen(false)
+  }
+
+  const label = unit === 'mm'
+    ? `${pxToMm(canvasSize.width)}×${pxToMm(canvasSize.height)} mm`
+    : `${canvasSize.width}×${canvasSize.height}`
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className={`btn text-xs ${open ? 'btn-primary' : ''}`}
+        title="Canvas size"
+      >
+        {label}
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-[#1a1a1a] border border-[#333] rounded shadow-xl p-3 w-52">
+          {/* Unit toggle */}
+          <div className="flex gap-1 mb-3">
+            {(['px', 'mm'] as const).map(u => (
+              <button
+                key={u}
+                onClick={() => setUnit(u)}
+                className={`btn flex-1 text-xs ${unit === u ? 'btn-primary' : ''}`}
+              >{u}</button>
+            ))}
+          </div>
+
+          {/* Width */}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs text-[#888] w-6">W</span>
+            <input
+              type="number"
+              value={displayW}
+              min={1}
+              step={unit === 'mm' ? 0.1 : 1}
+              onChange={e => applyW(parseFloat(e.target.value) || 1)}
+              className="input-base flex-1"
+            />
+            <span className="text-[10px] text-[#555]">{unit}</span>
+          </div>
+
+          {/* Height */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs text-[#888] w-6">H</span>
+            <input
+              type="number"
+              value={displayH}
+              min={1}
+              step={unit === 'mm' ? 0.1 : 1}
+              onChange={e => applyH(parseFloat(e.target.value) || 1)}
+              className="input-base flex-1"
+            />
+            <span className="text-[10px] text-[#555]">{unit}</span>
+          </div>
+
+          {/* Presets */}
+          <div className="mb-3">
+            <span className="text-[10px] text-[#555] block mb-1">Presets</span>
+            <div className="grid grid-cols-2 gap-1">
+              {[
+                { label: 'Square S', w: 500, h: 500 },
+                { label: 'Square M', w: 800, h: 800 },
+                { label: 'Square L', w: 1200, h: 1200 },
+                { label: 'A4', w: mmToPx(210), h: mmToPx(297) },
+                { label: 'A4 land.', w: mmToPx(297), h: mmToPx(210) },
+                { label: '16:9 HD', w: 1920, h: 1080 },
+              ].map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => { setW(p.w); setH(p.h) }}
+                  className="btn text-[10px] px-1.5"
+                >{p.label}</button>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={apply} className="btn btn-primary w-full text-xs">Apply</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Toolbar ──────────────────────────────────────────────────────────────────
+
 export function Toolbar() {
   const {
     activeTool, setActiveTool, viewMode, setViewMode,
     showGuides, showOffsets, toggleGuides, toggleOffsets,
-    undo, redo, addPath, sourcePaths, pixelMaps, canvasSize,
+    undo, redo, addPath, sourcePaths, pixelMaps, canvasSize, setCanvasSize,
     backgroundColor, setBackgroundColor,
   } = useStore()
 
@@ -50,7 +185,6 @@ export function Toolbar() {
       const paths = parseSVGPaths(text)
       paths.forEach(p => {
         addPath(createDefaultPath(undefined))
-        // Update the just-added path with parsed geometry
         const state = useStore.getState()
         const newSp = state.sourcePaths[state.sourcePaths.length - 1]
         state.updatePath(newSp.id, {
@@ -127,6 +261,12 @@ export function Toolbar() {
       <div className="flex gap-1 border-r border-[#2a2a2a] pr-3">
         <button onClick={undo} className="btn text-xs">↩ Undo</button>
         <button onClick={redo} className="btn text-xs">↪ Redo</button>
+      </div>
+
+      {/* Canvas size */}
+      <div className="flex items-center gap-1.5 border-r border-[#2a2a2a] pr-3">
+        <span className="text-xs text-[#aaa]">Canvas</span>
+        <CanvasSizeMenu canvasSize={canvasSize} setCanvasSize={setCanvasSize} />
       </div>
 
       {/* Background color */}
