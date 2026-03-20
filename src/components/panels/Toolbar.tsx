@@ -30,8 +30,9 @@ function CanvasSizeMenu({ canvasSize, setCanvasSize }: {
   canvasSize: { width: number; height: number }
   setCanvasSize: (w: number, h: number) => void
 }) {
+  const unit = useStore(s => s.displayUnit)
+  const setUnit = useStore(s => s.setDisplayUnit)
   const [open, setOpen] = useState(false)
-  const [unit, setUnit] = useState<'px' | 'mm'>('px')
   const [w, setW] = useState(canvasSize.width)
   const [h, setH] = useState(canvasSize.height)
   const ref = useRef<HTMLDivElement>(null)

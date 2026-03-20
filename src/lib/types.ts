@@ -129,6 +129,7 @@ export interface AppState {
   showGuides: boolean
   showOffsets: boolean
   canvasSize: { width: number; height: number }
+  displayUnit: 'px' | 'mm'
   backgroundColor: string
   history: HistoryEntry[]
   historyIndex: number

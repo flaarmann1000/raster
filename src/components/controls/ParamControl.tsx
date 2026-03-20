@@ -1,6 +1,12 @@
 'use client'
 import React, { useCallback } from 'react'
 import { MappedParam, PixelMap } from '@/lib/types'
+import { useStore } from '@/store/useStore'
+
+const PX_PER_MM = 96 / 25.4
+
+function pxToMm(px: number) { return +(px / PX_PER_MM).toFixed(2) }
+function mmToPx(mm: number) { return mm * PX_PER_MM }
 
 interface ParamControlProps {
   label: string
@@ -10,16 +16,33 @@ interface ParamControlProps {
   min?: number
   max?: number
   step?: number
-  unit?: string
+  unit?: string   // 'px' = convert when displayUnit is mm; anything else = show as-is
 }
 
-export function ParamControl({ label, param, onChange, pixelMaps, min, max, step = 0.1, unit }: ParamControlProps) {
+export function ParamControl({ label, param, onChange, pixelMaps, min, max, step, unit }: ParamControlProps) {
+  const displayUnit = useStore(s => s.displayUnit)
+  const convertMm = unit === 'px' && displayUnit === 'mm'
+
   const update = useCallback((partial: Partial<MappedParam>) => {
     onChange({ ...param, ...partial })
   }, [param, onChange])
 
   const pmin = min ?? param.min ?? 0
   const pmax = max ?? param.max ?? 500
+
+  // Convert stored-px bounds/value → display unit
+  const dispMin  = convertMm ? pxToMm(pmin) : pmin
+  const dispMax  = convertMm ? pxToMm(pmax) : pmax
+  const dispVal  = convertMm ? pxToMm(param.value) : param.value
+  const dispStep = step !== undefined
+    ? (convertMm ? +(step / PX_PER_MM).toFixed(3) : step)
+    : (convertMm ? 0.1 : 0.1)
+  const dispUnit = convertMm ? 'mm' : (unit ?? '')
+
+  const handleValueChange = (raw: number) => {
+    const px = convertMm ? mmToPx(raw) : raw
+    update({ value: px })
+  }
 
   return (
     <div className="mb-2">
@@ -46,19 +69,19 @@ export function ParamControl({ label, param, onChange, pixelMaps, min, max, step
         <div className="flex items-center gap-2">
           <input
             type="range"
-            min={pmin} max={pmax} step={step}
-            value={param.value}
-            onChange={e => update({ value: parseFloat(e.target.value) })}
+            min={dispMin} max={dispMax} step={dispStep}
+            value={dispVal}
+            onChange={e => handleValueChange(parseFloat(e.target.value))}
             className="flex-1 accent-[#4f8ef7] h-1"
           />
           <input
             type="number"
-            min={pmin} max={pmax} step={step}
-            value={param.value}
-            onChange={e => update({ value: parseFloat(e.target.value) || 0 })}
+            min={dispMin} max={dispMax} step={dispStep}
+            value={dispVal}
+            onChange={e => handleValueChange(parseFloat(e.target.value) || 0)}
             className="input-base w-16 text-right"
           />
-          {unit && <span className="text-[10px] text-[#666]">{unit}</span>}
+          {dispUnit && <span className="text-[10px] text-[#666]">{dispUnit}</span>}
         </div>
       )}
 

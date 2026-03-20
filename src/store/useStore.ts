@@ -82,6 +82,7 @@ interface StoreActions {
   undo: () => void
   redo: () => void
   setCanvasSize: (w: number, h: number) => void
+  setDisplayUnit: (u: 'px' | 'mm') => void
   setBackgroundColor: (c: string) => void
 }
 
@@ -99,6 +100,7 @@ const INITIAL_STATE: AppState = {
   showGuides: true,
   showOffsets: true,
   canvasSize: { width: 800, height: 800 },
+  displayUnit: 'px' as const,
   backgroundColor: '#111111',
   history: [],
   historyIndex: -1,
@@ -282,5 +284,6 @@ export const useStore = create<AppState & StoreActions>((set, get) => ({
   },
 
   setCanvasSize: (w, h) => set({ canvasSize: { width: w, height: h } }),
+  setDisplayUnit: (u) => set({ displayUnit: u }),
   setBackgroundColor: (c) => set({ backgroundColor: c }),
 }))
