@@ -1,5 +1,7 @@
 # SVG Grid Designer
 
+<img width="1920" height="1031" alt="localhost_3000_" src="https://github.com/user-attachments/assets/8b4bdb40-3dbc-4340-b057-b2d421fb661e" />
+
 A Next.js application for creating editable SVG-based guide paths and transforming them into generated grid-like designs made from repeated pill elements.
 
 Users can import SVG paths or draw curves directly in the app, edit anchor points and Bézier handles visually or numerically, generate offset guide lines, and render pill geometry along those paths. Numeric parameters can be controlled either by static values or by grayscale pixel maps created inside the app or uploaded from external files.
