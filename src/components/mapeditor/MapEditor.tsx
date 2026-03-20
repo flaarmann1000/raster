@@ -2,7 +2,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { useStore } from '@/store/useStore'
 import { PixelMap, MapLayer } from '@/lib/types'
-import { renderMap } from '@/lib/maps/renderer'
 
 export function MapEditor() {
   const pixelMaps = useStore(s => s.pixelMaps)
@@ -117,13 +116,18 @@ function MapPreviewThumbnail({ map, size }: { map: PixelMap; size: number }) {
   )
 }
 
+const FIT_OPTIONS = ['cover', 'contain', 'fill', 'none'] as const
+
 function MapEditorDetail({ map }: { map: PixelMap }) {
   const updateMap = useStore(s => s.updateMap)
   const addMapLayer = useStore(s => s.addMapLayer)
   const updateMapLayer = useStore(s => s.updateMapLayer)
   const removeMapLayer = useStore(s => s.removeMapLayer)
   const reRenderMap = useStore(s => s.reRenderMap)
+  const reorderMapLayers = useStore(s => s.reorderMapLayers)
+  const setImageLayerData = useStore(s => s.setImageLayerData)
   const previewRef = useRef<HTMLCanvasElement>(null)
+  const dragIndexRef = useRef<number | null>(null)
 
   // Update preview canvas when map data changes
   useEffect(() => {
@@ -141,9 +145,7 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
     ctx.putImageData(imgData, 0, 0)
   }, [map.data, map.width, map.height])
 
-  const handleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const decodeImageFile = useCallback((file: File, onDone: (data: Float32Array, url: string) => void) => {
     const reader = new FileReader()
     reader.onload = (ev) => {
       const url = ev.target?.result as string
@@ -157,15 +159,44 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
         const imgData = ctx.getImageData(0, 0, map.width, map.height)
         const data = new Float32Array(map.width * map.height)
         for (let i = 0; i < data.length; i++) {
-          // Luminance from RGB
           data[i] = (imgData.data[i*4] * 0.299 + imgData.data[i*4+1] * 0.587 + imgData.data[i*4+2] * 0.114) / 255
         }
-        updateMap(map.id, { data, imageDataUrl: url })
+        onDone(data, url)
       }
       img.src = url
     }
     reader.readAsDataURL(file)
-  }, [map.id, map.width, map.height, updateMap])
+  }, [map.width, map.height])
+
+  const handleAddImageLayer = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    decodeImageFile(file, (data, url) => {
+      addMapLayer(map.id, { type: 'image', imageDataUrl: url, imageData: data })
+    })
+    e.target.value = ''
+  }, [map.id, addMapLayer, decodeImageFile])
+
+  // Display index = map.layers.length - 1 - arrayIndex
+  const handleDragStart = (displayIdx: number) => {
+    dragIndexRef.current = displayIdx
+  }
+
+  const handleDrop = (displayIdx: number) => {
+    if (dragIndexRef.current === null || dragIndexRef.current === displayIdx) return
+    const fromDisplayIdx = dragIndexRef.current
+    const arrayLen = map.layers.length
+    const fromArrayIdx = arrayLen - 1 - fromDisplayIdx
+    const toArrayIdx = arrayLen - 1 - displayIdx
+    reorderMapLayers(map.id, fromArrayIdx, toArrayIdx)
+    dragIndexRef.current = null
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const reversedLayers = [...map.layers].reverse()
 
   return (
     <div className="p-3 space-y-4">
@@ -188,6 +219,47 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
             ))}
           </select>
         </div>
+        <div className="flex gap-2 items-center">
+          <span className="text-xs text-[#aaa] w-16">Fit</span>
+          <div className="flex gap-1 flex-1">
+            {FIT_OPTIONS.map(f => (
+              <button
+                key={f}
+                onClick={() => updateMap(map.id, { fit: f })}
+                className={`btn text-[10px] px-1.5 flex-1 ${(map.fit ?? 'cover') === f ? 'btn-primary' : ''}`}
+              >{f}</button>
+            ))}
+          </div>
+        </div>
+
+        {map.fit === 'none' && (
+          <div className="mt-2 space-y-1">
+            {([
+              { label: 'Zoom', key: 'mapZoom', min: 0.1, max: 10, step: 0.01, def: 1 },
+              { label: 'Offset X', key: 'mapOffsetX', min: -1, max: 1, step: 0.005, def: 0 },
+              { label: 'Offset Y', key: 'mapOffsetY', min: -1, max: 1, step: 0.005, def: 0 },
+            ] as const).map(({ label, key, min, max, step, def }) => {
+              const val = (map as any)[key] ?? def
+              return (
+                <div key={key} className="flex items-center gap-1">
+                  <span className="text-[10px] text-[#666] w-14">{label}</span>
+                  <input
+                    type="range" min={min} max={max} step={step}
+                    value={val}
+                    onChange={e => updateMap(map.id, { [key]: parseFloat(e.target.value) } as any)}
+                    className="flex-1 accent-[#4f8ef7] h-1"
+                  />
+                  <input
+                    type="number" min={min} max={max} step={step}
+                    value={val.toFixed(step < 0.01 ? 3 : 2)}
+                    onChange={e => updateMap(map.id, { [key]: parseFloat(e.target.value) || def } as any)}
+                    className="input-base w-16 text-right"
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Preview */}
@@ -204,19 +276,10 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
             />
           ) : (
             <div className="w-full h-24 bg-[#1a1a1a] rounded border border-[#2a2a2a] flex items-center justify-center text-[#444] text-xs">
-              No data — add a layer or upload an image
+              No data — add a layer
             </div>
           )}
         </div>
-      </div>
-
-      {/* Upload */}
-      <div>
-        <span className="section-label block mb-1">Upload Grayscale Image</span>
-        <label className="btn cursor-pointer block text-center">
-          Choose image
-          <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
-        </label>
       </div>
 
       {/* Layers */}
@@ -237,20 +300,39 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
               onClick={() => addMapLayer(map.id, { type: 'perlin-noise' })}
               className="btn text-[10px] px-1.5"
             >Perlin</button>
+            <label
+              title="Add Image layer"
+              className="btn text-[10px] px-1.5 cursor-pointer"
+            >
+              Image
+              <input type="file" accept="image/*" className="hidden" onChange={handleAddImageLayer} />
+            </label>
           </div>
         </div>
         <div className="space-y-1">
           {map.layers.length === 0 && (
             <p className="text-[10px] text-[#444] italic">No layers. Add a gradient or shape above.</p>
           )}
-          {[...map.layers].reverse().map(layer => (
-            <LayerEditor
+          {reversedLayers.map((layer, displayIdx) => (
+            <div
               key={layer.id}
-              layer={layer}
-              mapId={map.id}
-              onUpdate={(u) => updateMapLayer(map.id, layer.id, u)}
-              onRemove={() => removeMapLayer(map.id, layer.id)}
-            />
+              draggable
+              onDragStart={() => handleDragStart(displayIdx)}
+              onDragOver={handleDragOver}
+              onDrop={() => handleDrop(displayIdx)}
+            >
+              <LayerEditor
+                layer={layer}
+                mapId={map.id}
+                onUpdate={(u) => updateMapLayer(map.id, layer.id, u)}
+                onRemove={() => removeMapLayer(map.id, layer.id)}
+                onReplaceImage={(file) => {
+                  decodeImageFile(file, (data, url) => {
+                    setImageLayerData(map.id, layer.id, data, url)
+                  })
+                }}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -259,7 +341,7 @@ function MapEditorDetail({ map }: { map: PixelMap }) {
 }
 
 function layerTypeShort(t: string) {
-  return { 'linear-gradient': 'Lin', 'radial-gradient': 'Rad', 'rect': 'Rect', 'ellipse': 'Elps', 'perlin-noise': 'Perlin' }[t] ?? t
+  return { 'linear-gradient': 'Lin', 'radial-gradient': 'Rad', 'rect': 'Rect', 'ellipse': 'Elps', 'perlin-noise': 'Perlin', 'image': 'Image' }[t] ?? t
 }
 
 interface LayerEditorProps {
@@ -267,9 +349,10 @@ interface LayerEditorProps {
   mapId: string
   onUpdate: (u: Partial<MapLayer>) => void
   onRemove: () => void
+  onReplaceImage?: (file: File) => void
 }
 
-function LayerEditor({ layer, mapId, onUpdate, onRemove }: LayerEditorProps) {
+function LayerEditor({ layer, mapId: _mapId, onUpdate, onRemove, onReplaceImage }: LayerEditorProps) {
   const [open, setOpen] = useState(true)
 
   const num = (label: string, key: keyof MapLayer, min = 0, max = 1, step = 0.01) => (
@@ -334,7 +417,33 @@ function LayerEditor({ layer, mapId, onUpdate, onRemove }: LayerEditorProps) {
           {num('Opacity', 'opacity', 0, 1)}
           {num('Blur', 'blur', 0, 20, 0.5)}
 
-          {layer.type !== 'perlin-noise' && (
+          {layer.type === 'image' && (
+            <div className="mb-1">
+              {layer.imageDataUrl && (
+                <img
+                  src={layer.imageDataUrl}
+                  alt="layer preview"
+                  className="w-full max-h-20 object-contain rounded border border-[#2a2a2a] mb-1"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              )}
+              <label className="btn cursor-pointer block text-center text-[10px]">
+                Replace
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (file && onReplaceImage) onReplaceImage(file)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {layer.type !== 'perlin-noise' && layer.type !== 'image' && (
             <>
               {num('Color 0', 'color0', 0, 1)}
               {num('Color 1', 'color1', 0, 1)}

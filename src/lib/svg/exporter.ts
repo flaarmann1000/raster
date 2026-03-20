@@ -1,14 +1,12 @@
 import { SourcePath, PixelMap, AppState } from '../types'
-import { pathToSVGd } from '../geometry/bezier'
-import { generateOffsetLines } from '../geometry/offset'
+import { pathToSVGd, polylineToPathD } from '../geometry/bezier'
+import { generateOffsetPolylines, adaptiveSamplePolyline } from '../geometry/offset'
 import { smoothPath } from '../geometry/smooth'
-import { samplePath } from '../geometry/bezier'
 import { makePill } from '../geometry/pill'
 import { evalParam } from '../maps/params'
-import { v } from '../geometry/vec2'
 
 export function exportSVG(state: AppState, includeGuides = false): string {
-  const { sourcePaths, pixelMaps, canvasSize } = state
+  const { sourcePaths, pixelMaps, canvasSize, backgroundColor } = state
   const { width, height } = canvasSize
 
   const mapLookup = (id: string) => pixelMaps.find(m => m.id === id)
@@ -20,78 +18,68 @@ export function exportSVG(state: AppState, includeGuides = false): string {
     if (!sp.visible) continue
 
     const { offsetSettings, pillSettings, smoothingSettings } = sp
-    let centerPath = sp.path
+
+    const evalAt = (param: typeof pillSettings.length, wx: number, wy: number) =>
+      evalParam(param, wx, wy, width, height, mapLookup)
 
     // Non-destructive smoothing
+    let centerPath = sp.path
     if (smoothingSettings.enabled) {
-      const evalAt = (wx: number, wy: number) => evalParam(smoothingSettings.radius, wx, wy, width, height, mapLookup)
-      // Use center of canvas for a representative smoothing radius
-      const r = evalAt(width / 2, height / 2)
+      const r = evalAt(smoothingSettings.radius, width / 2, height / 2)
       centerPath = smoothPath(centerPath, r)
     }
 
-    // Guide lines
     if (includeGuides) {
       guideLines.push(`<path d="${pathToSVGd(centerPath)}" stroke="#ff6600" stroke-width="1" fill="none" opacity="0.6"/>`)
     }
 
-    // Evaluate offset settings at canvas center (static evaluation for count/global params)
-    const evalC = (param: typeof offsetSettings.count) =>
-      evalParam(param, width/2, height/2, width, height, mapLookup)
+    // Evaluate global offset params at canvas center
+    const count = Math.round(Math.max(0, evalAt(offsetSettings.count, width/2, height/2)))
+    const baseDistance = evalAt(offsetSettings.baseDistance, width/2, height/2)
+    const growth = evalAt(offsetSettings.growth, width/2, height/2)
 
-    const count = Math.round(Math.max(0, evalC(offsetSettings.count)))
-    const baseDistance = Math.max(0, evalC(offsetSettings.baseDistance))
-    const growth = evalC(offsetSettings.growth)
+    // Use same polyline pipeline as the render engine (includes loop removal)
+    const offsets = generateOffsetPolylines(centerPath, count, baseDistance, growth, offsetSettings.symmetric)
 
-    // Generate offset lines
-    const offsets = generateOffsetLines(centerPath, count, baseDistance, growth, offsetSettings.symmetric)
-
-    // For each offset line, place pills
     const pathPills: string[] = []
 
     for (const ol of offsets) {
-      const distanceFromCenter = Math.abs(ol.distance)
-      const offsetFraction = count > 0 ? distanceFromCenter / (count * baseDistance || 1) : 0
+      const distFromCenter = Math.abs(ol.distance)
 
-      if (includeGuides) {
-        guideLines.push(`<path d="${pathToSVGd(ol.path)}" stroke="#0099ff" stroke-width="0.5" fill="none" opacity="0.4"/>`)
+      if (includeGuides && ol.side !== 'center') {
+        guideLines.push(`<path d="${polylineToPathD(ol.points, false)}" stroke="#0099ff" stroke-width="0.5" fill="none" opacity="0.4"/>`)
       }
 
-      // Evaluate pill params at a representative point (mid-path)
-      // For per-pill evaluation we sample at each pill position
-      const evalAtPos = (param: typeof pillSettings.length, wx: number, wy: number) =>
-        evalParam(param, wx, wy, width, height, mapLookup)
+      const spacingFalloff = evalAt(pillSettings.spacingFalloff, width/2, height/2)
 
-      // Get spacing for this offset line (account for falloff)
-      const baseSpacing = evalAtPos(pillSettings.spacing, width/2, height/2)
-      const spacingFalloff = evalAtPos(pillSettings.spacingFalloff, width/2, height/2)
-      const spacing = Math.max(1, baseSpacing + spacingFalloff * offsetFraction)
-
-      const samples = samplePath(ol.path, spacing)
+      // Adaptive sampling — identical to RenderEngine
+      const samples = adaptiveSamplePolyline(ol.points, (pos) => {
+        const baseSpacing = evalAt(pillSettings.spacing, pos.x, pos.y)
+        return Math.max(1, baseSpacing + spacingFalloff * (distFromCenter / Math.max(Math.abs(baseDistance), 1)))
+      })
 
       for (const sample of samples) {
         const { pos } = sample
 
-        // Evaluate length with falloff
-        const baseLen = evalAtPos(pillSettings.length, pos.x, pos.y)
-        const lenFalloff = evalAtPos(pillSettings.lengthFalloff, pos.x, pos.y)
-        const pillLen = Math.max(0.5, baseLen - lenFalloff * distanceFromCenter)
-
-        // Evaluate thickness with falloff
-        const baseThick = evalAtPos(pillSettings.thickness, pos.x, pos.y)
-        const thickFalloff = evalAtPos(pillSettings.thicknessFalloff, pos.x, pos.y)
-        const pillThick = Math.max(0.5, baseThick - thickFalloff * distanceFromCenter)
+        const pillLen = Math.max(0.5,
+          evalAt(pillSettings.length, pos.x, pos.y) -
+          evalAt(pillSettings.lengthFalloff, pos.x, pos.y) * distFromCenter
+        )
+        const pillThick = Math.max(0.5,
+          evalAt(pillSettings.thickness, pos.x, pos.y) -
+          evalAt(pillSettings.thicknessFalloff, pos.x, pos.y) * distFromCenter
+        )
 
         const pill = makePill(pos, sample.tangent, pillLen, pillThick)
-
-        let pillSVG = ''
         const style = pillSettings.style
-        if (style === 'fill' || style === 'both') {
-          pillSVG += `<path d="${pill.d}" fill="${pillSettings.fillColor}"`
-          if (style === 'both') pillSVG += ` stroke="${pillSettings.strokeColor}" stroke-width="${pillSettings.strokeWidth}"`
-          pillSVG += `/>`
-        } else {
+
+        let pillSVG: string
+        if (style === 'stroke') {
           pillSVG = `<path d="${pill.d}" fill="none" stroke="${pillSettings.strokeColor}" stroke-width="${pillSettings.strokeWidth}"/>`
+        } else if (style === 'both') {
+          pillSVG = `<path d="${pill.d}" fill="${pillSettings.fillColor}" stroke="${pillSettings.strokeColor}" stroke-width="${pillSettings.strokeWidth}"/>`
+        } else {
+          pillSVG = `<path d="${pill.d}" fill="${pillSettings.fillColor}"/>`
         }
         pathPills.push(pillSVG)
       }
@@ -108,6 +96,7 @@ export function exportSVG(state: AppState, includeGuides = false): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+<rect width="${width}" height="${height}" fill="${backgroundColor}"/>
 ${guideGroup}<g id="pills">
 ${pillGroups.join('\n')}
 </g>

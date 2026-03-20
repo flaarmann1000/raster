@@ -16,7 +16,7 @@ export function evalParam(
   if ((param.mode === 'map' || param.mode === 'combined') && param.mapId) {
     const map = mapLookup(param.mapId)
     if (map && map.data) {
-      let sample = sampleMap(map.data, map.width, map.height, wx, wy, canvasW, canvasH)
+      let sample = sampleMap(map.data, map.width, map.height, wx, wy, canvasW, canvasH, map.fit, map.mapZoom, map.mapOffsetX, map.mapOffsetY)
       if (param.invert) sample = 1 - sample
 
       switch (param.blendMode) {

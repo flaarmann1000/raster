@@ -68,7 +68,10 @@ export function PathEditor({ svgRef, canvasW, canvasH }: PathEditorProps) {
       dragRef.current = hit
       e.preventDefault()
     } else {
-      setActivePath(null)
+      // Only deselect if clicking inside the canvas bounds
+      if (world.x >= 0 && world.x <= canvasW && world.y >= 0 && world.y <= canvasH) {
+        setActivePath(null)
+      }
     }
   }, [activeTool, toWorld, sourcePaths, activePathId, addPath, pushHistory, setActivePath, viewport.scale])
 
@@ -164,9 +167,9 @@ export function PathEditor({ svgRef, canvasW, canvasH }: PathEditorProps) {
         ))
       )}
 
-      {/* Hit area overlay — rendered last so it sits on top and captures all mouse events */}
+      {/* Hit area overlay — large enough to capture mouse events outside canvas bounds */}
       <rect
-        x={0} y={0} width={canvasW} height={canvasH}
+        x={-5000} y={-5000} width={canvasW + 10000} height={canvasH + 10000}
         fill="transparent"
         onMouseDown={(e: React.MouseEvent<SVGRectElement>) => onMouseDown(e as unknown as React.MouseEvent<SVGSVGElement>)}
         style={{ cursor: activeTool === 'draw' ? 'crosshair' : 'default' }}

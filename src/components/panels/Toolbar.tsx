@@ -1,6 +1,6 @@
 'use client'
 import React, { useCallback, useState, useRef, useEffect } from 'react'
-import { useStore } from '@/store/useStore'
+import { useStore, RasterProject } from '@/store/useStore'
 import { ActiveTool, ViewMode } from '@/lib/types'
 import { parseSVGPaths } from '@/lib/svg/parser'
 import { exportSVG } from '@/lib/svg/exporter'
@@ -160,7 +160,7 @@ export function Toolbar() {
     activeTool, setActiveTool, viewMode, setViewMode,
     showGuides, showOffsets, toggleGuides, toggleOffsets,
     undo, redo, addPath, sourcePaths, pixelMaps, canvasSize, setCanvasSize,
-    backgroundColor, setBackgroundColor,
+    backgroundColor, setBackgroundColor, displayUnit, loadProject,
   } = useStore()
 
   // Keyboard shortcuts
@@ -208,6 +208,44 @@ export function Toolbar() {
     a.click()
     URL.revokeObjectURL(url)
   }, [])
+
+  const handleSaveProject = useCallback(() => {
+    const state = useStore.getState()
+    const project: RasterProject = {
+      version: 1,
+      canvasSize: state.canvasSize,
+      backgroundColor: state.backgroundColor,
+      displayUnit: state.displayUnit,
+      sourcePaths: state.sourcePaths,
+      pixelMaps: state.pixelMaps.map(({ data: _data, ...rest }) => ({
+        ...rest,
+        layers: rest.layers.map(({ imageData: _imageData, ...layerRest }) => layerRest),
+      })),
+    }
+    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'project.raster'
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const handleLoadProject = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const project = JSON.parse(ev.target?.result as string) as RasterProject
+        if (project.version !== 1) { alert('Unsupported project version.'); return }
+        loadProject(project)
+      } catch {
+        alert('Could not read project file.')
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }, [loadProject])
 
   const handleExportWithGuides = useCallback(() => {
     const state = useStore.getState()
@@ -282,13 +320,22 @@ export function Toolbar() {
         />
       </div>
 
-      {/* Import */}
+      {/* Project save / load */}
+      <div className="flex gap-1 border-r border-[#2a2a2a] pr-3">
+        <button onClick={handleSaveProject} className="btn text-xs">Save</button>
+        <label className="btn text-xs cursor-pointer">
+          Load
+          <input type="file" accept=".raster,application/json" className="hidden" onChange={handleLoadProject} />
+        </label>
+      </div>
+
+      {/* Import SVG */}
       <label className="btn text-xs cursor-pointer">
         Import SVG
         <input type="file" accept=".svg,image/svg+xml" className="hidden" onChange={handleImportSVG} />
       </label>
 
-      {/* Export */}
+      {/* Export SVG */}
       <button onClick={handleExport} className="btn btn-primary text-xs">Export SVG</button>
       <button onClick={handleExportWithGuides} className="btn text-xs">+ Guides</button>
     </div>

@@ -70,7 +70,7 @@ export interface SourcePath {
 }
 
 // ─── Pixel map ────────────────────────────────────────────────────────────────
-export type MapLayerType = 'linear-gradient' | 'radial-gradient' | 'rect' | 'ellipse' | 'brush' | 'perlin-noise'
+export type MapLayerType = 'linear-gradient' | 'radial-gradient' | 'rect' | 'ellipse' | 'brush' | 'perlin-noise' | 'image'
 
 export interface MapLayer {
   id: string
@@ -91,6 +91,9 @@ export interface MapLayer {
   noiseScale?: number
   noiseOctaves?: number
   noiseSeed?: number
+  // image specific
+  imageDataUrl?: string
+  imageData?: Float32Array  // transient, not persisted
 }
 
 export interface PixelMap {
@@ -103,6 +106,10 @@ export interface PixelMap {
   data: Float32Array | null
   // for uploaded images
   imageDataUrl?: string
+  fit?: 'cover' | 'contain' | 'fill' | 'none'
+  mapZoom?: number     // for fit='none': zoom factor (default 1)
+  mapOffsetX?: number  // for fit='none': UV offset x (default 0)
+  mapOffsetY?: number  // for fit='none': UV offset y (default 0)
 }
 
 // ─── Canvas viewport ─────────────────────────────────────────────────────────

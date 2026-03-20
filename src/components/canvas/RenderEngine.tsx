@@ -38,8 +38,8 @@ export function RenderEngine({
 
   return (
     <>
-      {/* Map overlay — only in Pixel Map view */}
-      {activeMap && viewMode === 'map' && (
+      {/* Map overlay — in Pixel Map view and combined view */}
+      {activeMap && (viewMode === 'map' || viewMode === 'combined') && (
         <MapOverlay map={activeMap} canvasW={canvasW} canvasH={canvasH} viewMode={viewMode} />
       )}
       {sourcePaths.map(sp => (
@@ -211,13 +211,39 @@ function MapOverlay({ map, canvasW, canvasH, viewMode }: MapOverlayProps) {
 
   if (!dataUrl) return null
 
-  const opacity = viewMode === 'map' ? 0.85 : 0.35
+  const opacity = viewMode === 'map' ? 0.85 : 0.2
+  const fit = map.fit ?? 'cover'
+
+  let x: number, y: number, w: number, h: number
+
+  if (fit === 'cover') {
+    const size = Math.max(canvasW, canvasH)
+    const dx = (size - canvasW) / 2
+    const dy = (size - canvasH) / 2
+    x = -dx; y = -dy; w = size; h = size
+  } else if (fit === 'contain') {
+    const scale = Math.min(canvasW, canvasH)
+    const dx = (canvasW - scale) / 2
+    const dy = (canvasH - scale) / 2
+    x = dx; y = dy; w = scale; h = scale
+  } else if (fit === 'none') {
+    const zoom = map.mapZoom ?? 1
+    const ox = map.mapOffsetX ?? 0
+    const oy = map.mapOffsetY ?? 0
+    w = canvasW * zoom
+    h = canvasH * zoom
+    x = -ox * w
+    y = -oy * h
+  } else {
+    // 'fill': stretch map to canvas
+    x = 0; y = 0; w = canvasW; h = canvasH
+  }
 
   return (
     <image
       href={dataUrl}
-      x={0} y={0}
-      width={canvasW} height={canvasH}
+      x={x} y={y}
+      width={w} height={h}
       opacity={opacity}
       style={{ imageRendering: 'pixelated' }}
     />

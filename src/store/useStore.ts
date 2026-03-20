@@ -72,6 +72,8 @@ interface StoreActions {
   addMapLayer: (mapId: string, layer: Partial<MapLayer>) => void
   updateMapLayer: (mapId: string, layerId: string, update: Partial<MapLayer>) => void
   removeMapLayer: (mapId: string, layerId: string) => void
+  reorderMapLayers: (mapId: string, fromIndex: number, toIndex: number) => void
+  setImageLayerData: (mapId: string, layerId: string, imageData: Float32Array, imageDataUrl: string) => void
   reRenderMap: (mapId: string) => void
   setViewport: (vp: Partial<Viewport>) => void
   setViewMode: (m: ViewMode) => void
@@ -84,6 +86,16 @@ interface StoreActions {
   setCanvasSize: (w: number, h: number) => void
   setDisplayUnit: (u: 'px' | 'mm') => void
   setBackgroundColor: (c: string) => void
+  loadProject: (project: RasterProject) => void
+}
+
+export interface RasterProject {
+  version: 1
+  canvasSize: { width: number; height: number }
+  backgroundColor: string
+  displayUnit: 'px' | 'mm'
+  sourcePaths: SourcePath[]
+  pixelMaps: Array<Omit<PixelMap, 'data'> & { layers: Array<Omit<MapLayer, 'imageData'>> }>
 }
 
 const initialPath = createDefaultPath()
@@ -176,11 +188,12 @@ export const useStore = create<AppState & StoreActions>((set, get) => ({
   addMap: (partial) => {
     const id = uid('map')
     const { canvasSize } = get()
+    const mapSize = Math.max(canvasSize.width, canvasSize.height)
     const map: PixelMap = {
       id,
       label: `Map ${get().pixelMaps.length + 1}`,
-      width: canvasSize.width,
-      height: canvasSize.height,
+      width: mapSize,
+      height: mapSize,
       layers: [],
       data: null,
       ...partial,
@@ -244,6 +257,30 @@ export const useStore = create<AppState & StoreActions>((set, get) => ({
     get().reRenderMap(mapId)
   },
 
+  reorderMapLayers: (mapId, fromIndex, toIndex) => {
+    set(s => ({
+      pixelMaps: s.pixelMaps.map(m => {
+        if (m.id !== mapId) return m
+        const layers = [...m.layers]
+        const [moved] = layers.splice(fromIndex, 1)
+        layers.splice(toIndex, 0, moved)
+        return { ...m, layers }
+      })
+    }))
+    get().reRenderMap(mapId)
+  },
+
+  setImageLayerData: (mapId, layerId, imageData, imageDataUrl) => {
+    set(s => ({
+      pixelMaps: s.pixelMaps.map(m =>
+        m.id === mapId
+          ? { ...m, layers: m.layers.map(l => l.id === layerId ? { ...l, imageData, imageDataUrl } : l) }
+          : m
+      )
+    }))
+    get().reRenderMap(mapId)
+  },
+
   reRenderMap: (mapId) => {
     const map = get().pixelMaps.find(m => m.id === mapId)
     if (!map) return
@@ -286,4 +323,48 @@ export const useStore = create<AppState & StoreActions>((set, get) => ({
   setCanvasSize: (w, h) => set({ canvasSize: { width: w, height: h } }),
   setDisplayUnit: (u) => set({ displayUnit: u }),
   setBackgroundColor: (c) => set({ backgroundColor: c }),
+
+  loadProject: (project) => {
+    const pixelMaps: PixelMap[] = project.pixelMaps.map(m => ({ ...m, data: null }))
+    set({
+      sourcePaths: project.sourcePaths,
+      pixelMaps,
+      canvasSize: project.canvasSize,
+      backgroundColor: project.backgroundColor,
+      displayUnit: project.displayUnit ?? 'px',
+      activePathId: project.sourcePaths[0]?.id ?? null,
+      activeMapId: null,
+      activePointIndex: null,
+      history: [],
+      historyIndex: -1,
+    })
+    // Re-render all pixel maps
+    pixelMaps.forEach(m => get().reRenderMap(m.id))
+    // Decode image layers asynchronously
+    const mapSize = Math.max(project.canvasSize.width, project.canvasSize.height)
+    for (const m of project.pixelMaps) {
+      for (const layer of m.layers) {
+        if (layer.type === 'image' && layer.imageDataUrl) {
+          const url = layer.imageDataUrl
+          const mapId = m.id
+          const layerId = layer.id
+          const img = new Image()
+          img.onload = () => {
+            const offCanvas = document.createElement('canvas')
+            offCanvas.width = mapSize
+            offCanvas.height = mapSize
+            const ctx = offCanvas.getContext('2d')!
+            ctx.drawImage(img, 0, 0, mapSize, mapSize)
+            const imgData = ctx.getImageData(0, 0, mapSize, mapSize)
+            const data = new Float32Array(mapSize * mapSize)
+            for (let i = 0; i < data.length; i++) {
+              data[i] = (imgData.data[i*4] * 0.299 + imgData.data[i*4+1] * 0.587 + imgData.data[i*4+2] * 0.114) / 255
+            }
+            get().setImageLayerData(mapId, layerId, data, url)
+          }
+          img.src = url
+        }
+      }
+    }
+  },
 }))

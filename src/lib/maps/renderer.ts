@@ -29,6 +29,7 @@ function renderLayer(layer: MapLayer, data: Float32Array, w: number, h: number) 
     case 'ellipse': renderEllipse(layer, tmp, w, h); break
     case 'brush': renderBrush(layer, tmp, w, h); break
     case 'perlin-noise': renderPerlinNoise(layer, tmp, w, h); break
+    case 'image': renderImageLayer(layer, tmp, w, h); break
   }
 
   // Apply blur
@@ -116,6 +117,18 @@ function renderBrush(_layer: MapLayer, _data: Float32Array, _w: number, _h: numb
   // Brush strokes are stored as pixel data in the layer's cached data (set externally)
 }
 
+function renderImageLayer(layer: MapLayer, data: Float32Array, w: number, h: number) {
+  if (!layer.imageData || layer.imageData.length === 0) return
+  const imgSize = Math.round(Math.sqrt(layer.imageData.length))
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const sx = Math.min(imgSize - 1, Math.floor(px * imgSize / w))
+      const sy = Math.min(imgSize - 1, Math.floor(py * imgSize / h))
+      data[py * w + px] = layer.imageData[sy * imgSize + sx]
+    }
+  }
+}
+
 function renderPerlinNoise(layer: MapLayer, data: Float32Array, w: number, h: number) {
   const scale = layer.noiseScale ?? 4
   const octaves = Math.round(layer.noiseOctaves ?? 4)
@@ -197,13 +210,42 @@ export function sampleMap(
   mapData: Float32Array | null,
   mapW: number, mapH: number,
   wx: number, wy: number,
-  canvasW: number, canvasH: number
+  canvasW: number, canvasH: number,
+  fit?: string,
+  mapZoom?: number,
+  mapOffsetX?: number,
+  mapOffsetY?: number,
 ): number {
   if (!mapData || mapData.length === 0) return 0
 
-  const u = wx / canvasW
-  const vv = wy / canvasH
+  let u: number, v: number
+
+  if (fit === 'none') {
+    const zoom = mapZoom ?? 1
+    const ox = mapOffsetX ?? 0
+    const oy = mapOffsetY ?? 0
+    u = wx / canvasW / zoom + ox
+    v = wy / canvasH / zoom + oy
+  } else if (fit === 'fill') {
+    u = wx / canvasW
+    v = wy / canvasH
+  } else if (fit === 'contain') {
+    const scale = Math.min(canvasW, canvasH)
+    u = (wx - (canvasW - scale) / 2) / scale
+    v = (wy - (canvasH - scale) / 2) / scale
+    u = Math.max(0, Math.min(1, u))
+    v = Math.max(0, Math.min(1, v))
+  } else {
+    // 'cover' (default): scale the square map so it fills the canvas (larger dimension fits),
+    // centering along the shorter dimension.
+    const scale = Math.max(canvasW, canvasH)
+    const dx = (scale - canvasW) / 2
+    const dy = (scale - canvasH) / 2
+    u = (wx + dx) / scale
+    v = (wy + dy) / scale
+  }
+
   const px = Math.max(0, Math.min(mapW - 1, Math.floor(u * mapW)))
-  const py = Math.max(0, Math.min(mapH - 1, Math.floor(vv * mapH)))
+  const py = Math.max(0, Math.min(mapH - 1, Math.floor(v * mapH)))
   return mapData[py * mapW + px]
 }

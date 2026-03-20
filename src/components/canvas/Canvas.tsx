@@ -108,6 +108,7 @@ export function Canvas() {
           transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
           transformOrigin: '0 0',
           boxShadow: '0 0 0 1px #333, 0 4px 32px rgba(0,0,0,0.5)',
+          overflow: 'visible',
         }}
       >
         {/* Background */}
